@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+
+use std::fs;
+use std::path::PathBuf; 
 use crate::cli::DeliveryMode;
 use crate::connection::MoqConnection;
 use crate::utils::should_log;
@@ -39,6 +42,7 @@ use tracing::{debug, error, info};
 pub struct PublishConfig {
   pub namespace: String,
   pub track_name: String,
+  pub track_path: String,
   pub delivery_mode: DeliveryMode,
   pub group_count: u64,
   pub interval: u64,
@@ -110,7 +114,7 @@ pub async fn run_namespace(moq: MoqConnection, config: PublishNamespaceConfig) -
         // Spawn a task to send data for this subscription
         let conn = connection.clone();
         let dc = data_config.clone();
-        let task = tokio::spawn(async move { send_data(&conn, track_alias, &dc).await });
+        let task = tokio::spawn(async move { send_data(&conn, track_alias, " ", &dc).await });
         tasks.push(task);
       }
       Ok(ControlMessage::Unsubscribe(m)) => {
@@ -159,17 +163,20 @@ pub async fn run(moq: MoqConnection, config: PublishConfig) -> Result<()> {
     payload_size: config.payload_size,
     publisher_priority: config.publisher_priority,
   };
-
+  
   publish_track(
     &connection,
     &mut control_stream,
     &ns,
     &config.track_name,
+    &config.track_path,
     config.track_alias,
     config.group_order,
     &data_config,
   )
   .await?;
+  
+ 
 
   // Keep connection alive briefly to ensure delivery
   info!("Waiting before closing connection...");
@@ -222,11 +229,16 @@ struct DataConfig {
   publisher_priority: u8,
 }
 
+
+
+
 async fn publish_track(
   connection: &Arc<wtransport::Connection>,
   control_stream: &mut ControlStreamHandler,
   namespace: &Tuple,
   track_name: &str,
+  
+  track_path: &str,
   track_alias: u64,
   group_order: GroupOrder,
   data_config: &DataConfig,
@@ -256,12 +268,14 @@ async fn publish_track(
     Err(e) => anyhow::bail!("Failed waiting for PublishOk: {:?}", e),
   }
 
-  send_data(connection, track_alias, data_config).await
+  send_data(connection, track_alias, track_path,data_config).await
 }
+
 
 async fn send_data(
   connection: &Arc<wtransport::Connection>,
   track_alias: u64,
+  track_path: &str, 
   config: &DataConfig,
 ) -> Result<()> {
   match config.delivery_mode {
@@ -281,6 +295,7 @@ async fn send_data(
       send_via_streams(
         connection,
         track_alias,
+        track_path,
         config.group_count,
         config.interval,
         config.objects_per_group,
@@ -354,6 +369,7 @@ async fn send_datagrams(
 async fn send_via_streams(
   connection: &wtransport::Connection,
   track_alias: u64,
+  track_path: &str,
   group_count: u64,
   interval_ms: u64,
   objects_per_group: u64,
@@ -385,12 +401,17 @@ async fn send_via_streams(
     let mut prev_object_id = None;
     for object_id in 0..objects_per_group {
       let payload = generate_payload(payload_size);
+      
+      let user_video_payload = generate_video_payload(track_path, group_id);
+      
+      
+      let user_payload_size = user_video_payload.len();
 
       let subgroup_obj = SubgroupObject {
         object_id,
         extension_headers: Some(vec![]),
         object_status: None,
-        payload: Some(Bytes::from(payload)),
+        payload: Some(Bytes::from(user_video_payload)),
       };
       let object =
         Object::try_from_subgroup(subgroup_obj, track_alias, group_id, Some(group_id), Some(1))?;
@@ -401,7 +422,7 @@ async fn send_via_streams(
           if should_log(total) {
             info!(
               "Sent object: group={}, object={}, size={} bytes",
-              group_id, object_id, payload_size
+              group_id, object_id, user_payload_size
             );
           } else {
             debug!("Sent object: group={}, object={}", group_id, object_id);
@@ -437,4 +458,19 @@ fn generate_payload(size: usize) -> Vec<u8> {
       (seed & 0xFF) as u8
     })
     .collect()
+}
+
+fn generate_video_payload(track: &str, group: u64) -> Vec<u8> {
+    let mut path = PathBuf::new();
+    
+    let filename = format!("out{:03}.mp4", group);
+    
+    path.push(track);
+    path.push(filename);
+    
+    println!("Next chunk {:?} loading...", path);
+    
+    fs::read(path).expect("Read chunk error...")
+    
+
 }

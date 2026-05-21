@@ -135,7 +135,11 @@ pub struct Cli {
   /// Publisher priority 0 (highest) – 255 (lowest) (publish only)
   #[arg(long, default_value_t = 128)]
   pub publisher_priority: u8,
-
+  
+  /// Publish a certain video chunks
+  #[arg(long)]
+  pub track_path: String,
+  
   /// Group order for the track
   #[arg(long, value_enum, default_value = "ascending")]
   pub group_order: CliGroupOrder,

@@ -45,6 +45,7 @@ async fn main() -> Result<(), anyhow::Error> {
       let config = publisher::PublishConfig {
         namespace: cli.namespace,
         track_name: cli.track_name,
+        track_path: cli.track_path,
         delivery_mode: cli.delivery_mode,
         group_count: cli.group_count,
         interval: cli.interval,
