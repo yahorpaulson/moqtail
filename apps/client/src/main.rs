@@ -29,6 +29,8 @@ use tracing_subscriber::filter::LevelFilter;
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
+
+
   init_logging();
 
   let cli = Cli::parse();
@@ -45,7 +47,8 @@ async fn main() -> Result<(), anyhow::Error> {
       let config = publisher::PublishConfig {
         namespace: cli.namespace,
         track_name: cli.track_name,
-        track_path: cli.track_path,
+        track_path: cli.track_path.unwrap_or_default(),
+        tracks: cli.track,
         delivery_mode: cli.delivery_mode,
         group_count: cli.group_count,
         interval: cli.interval,

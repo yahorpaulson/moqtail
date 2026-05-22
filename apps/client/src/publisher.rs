@@ -43,6 +43,7 @@ pub struct PublishConfig {
   pub namespace: String,
   pub track_name: String,
   pub track_path: String,
+  pub tracks: Vec<String>,
   pub delivery_mode: DeliveryMode,
   pub group_count: u64,
   pub interval: u64,
@@ -152,6 +153,8 @@ pub async fn run(moq: MoqConnection, config: PublishConfig) -> Result<()> {
     connection,
     mut control_stream,
   } = moq;
+  
+   
 
   let ns = Tuple::from_utf8_path(&config.namespace);
 
@@ -163,7 +166,8 @@ pub async fn run(moq: MoqConnection, config: PublishConfig) -> Result<()> {
     payload_size: config.payload_size,
     publisher_priority: config.publisher_priority,
   };
-  
+   
+  /*
   publish_track(
     &connection,
     &mut control_stream,
@@ -175,6 +179,28 @@ pub async fn run(moq: MoqConnection, config: PublishConfig) -> Result<()> {
     &data_config,
   )
   .await?;
+  */
+  for track in &config.tracks {
+  
+    let (name, path) = track
+    .split_once('=')
+    .expect("Use name=path");
+    
+    println!("Track = {}, PATH = {}", name, path);
+    
+    publish_track(
+        &connection,
+        &mut control_stream,
+        &ns,
+        name,
+        path,
+        config.track_alias,
+        config.group_order,
+        &data_config,
+    ).await?;
+  }
+ 
+  
   
  
 

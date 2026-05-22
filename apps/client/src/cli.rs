@@ -136,9 +136,14 @@ pub struct Cli {
   #[arg(long, default_value_t = 128)]
   pub publisher_priority: u8,
   
+  
+  ///Publish multiple tracks concurrently
+  #[arg(long)]
+  pub track: Vec<String>,
+  
   /// Publish a certain video chunks
   #[arg(long)]
-  pub track_path: String,
+  pub track_path: Option<String>,
   
   /// Group order for the track
   #[arg(long, value_enum, default_value = "ascending")]
