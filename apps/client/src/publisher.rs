@@ -166,7 +166,48 @@ pub async fn run(moq: MoqConnection, config: PublishConfig) -> Result<()> {
     payload_size: config.payload_size,
     publisher_priority: config.publisher_priority,
   };
-   
+  
+  
+  let mut tasks = Vec::new();
+
+  for (index, track) in config.tracks.iter().enumerate() {
+      let (name, path) = track
+          .split_once('=')
+          .expect("Use name=path");
+
+    let track_alias = config.track_alias + index as u64;
+
+    // 1. Register track через control_stream
+    register_track(
+        &mut control_stream,
+        &ns,
+        name,
+        track_alias,
+        config.group_order,
+    ).await?;
+
+    // 2. Send video chunks параллельно
+    let connection_clone = connection.clone();
+    let path_string = path.to_string();
+    let data_config_clone = data_config.clone();
+
+    let task = tokio::spawn(async move {
+        send_data(
+            &connection_clone,
+            track_alias,
+            &path_string,
+            &data_config_clone,
+        ).await
+    });
+
+        tasks.push(task);
+    }
+
+    for task in tasks {
+        task.await??;
+   }
+   Ok(())
+}
   /*
   publish_track(
     &connection,
@@ -180,38 +221,42 @@ pub async fn run(moq: MoqConnection, config: PublishConfig) -> Result<()> {
   )
   .await?;
   */
-  for track in &config.tracks {
-  
-    let (name, path) = track
-    .split_once('=')
-    .expect("Use name=path");
-    
-    println!("Track = {}, PATH = {}", name, path);
-    
-    publish_track(
-        &connection,
-        &mut control_stream,
-        &ns,
-        name,
-        path,
-        config.track_alias,
-        config.group_order,
-        &data_config,
-    ).await?;
-  }
- 
-  
-  
- 
 
-  // Keep connection alive briefly to ensure delivery
-  info!("Waiting before closing connection...");
-  tokio::time::sleep(Duration::from_secs(2)).await;
 
-  info!("Closing connection...");
-  connection.close(0u32.into(), b"Done");
+//additional function for register tracks
+async fn register_track(
+    control_stream: &mut ControlStreamHandler,
+    namespace: &Tuple,
+    track_name: &str,
+    track_alias: u64,
+    group_order: GroupOrder,
+) -> Result<()> {
+    let publish = Publish::new(
+        0,
+        namespace.clone(),
+        TupleField::from_utf8(track_name),
+        track_alias,
+        vec![
+            MessageParameter::new_group_order(group_order),
+            MessageParameter::new_largest_object(Location::new(0, 0)),
+            MessageParameter::Forward { forward: true },
+        ],
+        vec![],
+    );
 
-  Ok(())
+    control_stream
+        .send(&ControlMessage::Publish(Box::new(publish)))
+        .await?;
+
+    match control_stream.next_message().await {
+        Ok(ControlMessage::PublishOk(m)) => {
+            info!("Track published, request_id: {}", m.request_id);
+        }
+        Ok(m) => anyhow::bail!("Expected PublishOk, got {:?}", m),
+        Err(e) => anyhow::bail!("Failed waiting for PublishOk: {:?}", e),
+    }
+
+    Ok(())
 }
 
 async fn publish_namespace(
