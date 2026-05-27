@@ -28,6 +28,10 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info};
+use bytes::Bytes;
+use tokio::sync::broadcast;
+use std::time::Duration;
+use wtransport::{Endpoint, Identity, ServerConfig};
 
 /// Subscribe to one track and return its assigned track alias.
 async fn subscribe_track(
@@ -96,6 +100,20 @@ pub async fn run(moq: MoqConnection, config: SubscribeConfig) -> Result<()> {
   )
   .await?;
 
+  //Create async tokio connection for brodcast transmitting to browser clients
+  let (video_tx, _) = tokio::sync::broadcast::channel::<bytes::Bytes>(128);
+
+  let wt_tx = video_tx.clone();
+
+  //Start WebTransport
+  tokio::spawn(async move{
+    if let Err(e) = run_webtransport_server(wt_tx).await {
+      eprintln!("WebTransport server error: {:?}", e);
+    }
+    println!("WebTransport works!");
+  });
+
+
   let extra_alias = if let Some((ref extra_name, extra_priority)) = config.extra_track {
     let alias = subscribe_track(
       &mut control_stream,
@@ -114,7 +132,7 @@ pub async fn run(moq: MoqConnection, config: SubscribeConfig) -> Result<()> {
   match config.delivery_mode {
     DeliveryMode::Datagram => receive_datagrams(&connection, track_alias, config.duration).await,
     DeliveryMode::Subgroup => {
-      receive_streams(&connection, track_alias, extra_alias, config.duration).await
+      receive_streams(&connection, track_alias, extra_alias, config.duration, video_tx).await
     }
   }
 }
@@ -212,6 +230,7 @@ async fn receive_streams(
   primary_alias: u64,
   extra_alias: Option<(String, u64)>,
   duration: u64,
+  video_tx: broadcast::Sender<Bytes>,
 ) -> Result<()> {
   info!("Listening for incoming streams...");
 
@@ -261,6 +280,12 @@ async fn receive_streams(
                     stats.total_received, label, obj.location.group, obj.location.object
                   );
                 }
+
+
+                //send from server subscriber to browser
+                if let Some(payload) = obj.payload.clone(){
+                  let _ = video_tx.send(payload);
+                }
                 handler = next_handler;
               }
               None => {
@@ -294,4 +319,54 @@ async fn receive_streams(
   );
 
   Ok(())
+}
+
+
+async fn run_webtransport_server(video_tx: broadcast::Sender<Bytes>) -> Result<()> {
+
+  let config = ServerConfig::builder()
+    .with_bind_default(4433)
+    .with_identity(Identity::self_signed(["localhost"]).unwrap())
+    .keep_alive_interval(Some(Duration::from_secs(3)))
+    .build();
+
+    let server = Endpoint::server(config)?;
+
+    info!("WebTransport started");
+
+    loop {
+      let incoming_session = server.accept().await;
+
+      let tx = video_tx.clone();
+
+
+      tokio::spawn(async move {
+        if let Err(e) = handle_webtransport_client(incoming_session, tx).await {{
+          error!("Webtransport error");
+        }}
+      });
+    }
+}
+
+
+async fn handle_webtransport_client(
+  incoming_session: wtransport::endpoint::IncomingSession,
+  video_tx: broadcast::Sender<Bytes>)-> Result<()> {
+
+  info!("Waiting for WebTransport session...");
+
+
+  let session_req =incoming_session.await?;
+
+  let connection = session_req.accept().await?;
+
+  let mut rx = video_tx.subscribe();
+
+  loop{
+    let segment = rx.recv().await?;
+
+    let mut stream = connection.open_uni().await?.await?;
+    stream.write_all(&segment).await?;
+    stream.finish().await?;
+  }
 }
