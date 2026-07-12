@@ -34,6 +34,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use tokio::sync::{Notify, RwLock};
 use tracing::{debug, error, info, warn};
+use bytes::{BufMut, BytesMuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub type ActiveSubgroupHeaderMap = Arc<RwLock<HashMap<StreamId, HeaderInfo>>>;
 
@@ -95,6 +97,15 @@ pub struct Track {
   /// Inserted when the first object of a subgroup arrives; removed when the
   /// publisher's unistream closes (stream_closed signal).
   pub active_subgroup_headers: ActiveSubgroupHeaderMap,
+}
+
+
+
+fn now_ms() -> u64 {
+  SystemTime::now()
+    .duration_since(UNIX_EPOCH)
+    .expect("System time before epoch")
+    .as_millis() as u64
 }
 
 // TODO: this track implementation should be static? At least
@@ -310,9 +321,20 @@ impl Track {
     }
 
     // Send single Object event with optional header info
+    let mut relay_object = object.clone();
+    
+    if let Some(payload) = relay_object.payload.take() {
+      let mut stamped = BytesMuf::with_capacity(8 +payload.len());
+
+      stamped.put_u64(now_ms());
+      stamped.extend_from_slice(&payload);
+
+      relay_object.payload = Some(stamped.freeze());
+    }
+
     let event = TrackEvent::SubgroupObject {
       stream_id: stream_id.clone(),
-      object: object.clone(),
+      object: relay_object,
       header_info: header_info.cloned(),
     };
 

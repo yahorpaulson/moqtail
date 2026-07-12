@@ -171,11 +171,15 @@ impl ControlMessageTrait for Subscribe {
   }
 
   fn parse_payload(payload: &mut Bytes) -> Result<Box<Self>, ParseError> {
+    println!("Subscribe raw payload: {:02x?}", payload.chunk());
     let request_id = payload.get_vi()?;
+    println!("request_id = {}", request_id);
     let track_namespace = Tuple::deserialize(payload)?;
-
+    println!("track_namespace = {:?}", track_namespace);
     let name_len_u64 = payload.get_vi()?;
+    println!("name_len = {}", name_len_u64);
     let name_len: usize = name_len_u64
+
       .try_into()
       .map_err(|e: std::num::TryFromIntError| ParseError::CastingError {
         context: "Subscribe::parse_payload(track_name_len)",
@@ -192,7 +196,6 @@ impl ControlMessageTrait for Subscribe {
       });
     }
     let track_name = TupleField::new(payload.copy_to_bytes(name_len));
-
     let param_count = payload.get_vi()?;
     let subscribe_parameters =
       deserialize_message_parameters(payload, param_count, ControlMessageType::Subscribe)?;
