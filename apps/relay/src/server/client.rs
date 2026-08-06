@@ -23,7 +23,6 @@ use crate::server::{
 };
 use anyhow::Result;
 #[allow(dead_code)]
-use bytes::Bytes;
 use moqtail::{
   model::{
     common::tuple::Tuple,
@@ -45,6 +44,7 @@ use tokio::time::Instant;
 use tracing::{debug, error, info, warn};
 use wtransport::{Connection, SendStream, error::StreamWriteError};
 
+use bytes::{Bytes};
 /// Token-bucket rate limiter. All streams of one subscriber share a single
 /// bucket so they compete for bandwidth — the QUIC scheduler then drains
 /// higher-priority streams first when writes are pending.
@@ -411,8 +411,11 @@ impl MOQTClient {
       rl.lock().await.consume(object.len()).await;
     }
 
+
+
     if let Some(s) = send_stream {
       let mut stream = s.lock().await;
+
       match stream.write_all(&object).await {
         Ok(..) => {}
         Err(e) => {

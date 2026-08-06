@@ -52,6 +52,19 @@ use tracing::warn;
 use tracing::{debug, error, info};
 use wtransport::SendStream;
 
+use bytes::{BufMut, BytesMut};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+
+fn now_ms() -> u64 {
+  SystemTime::now()
+    .duration_since(UNIX_EPOCH)
+    .expect("System time before epoch")
+    .as_millis() as u64
+}
+
+
+
 #[derive(Debug, Clone)]
 pub enum SubscriptionOrigin {
   Subscribe(Subscribe),
@@ -1187,6 +1200,11 @@ impl Subscription {
     }
   }
 
+
+ 
+
+  
+
   async fn handle_object(
     &self,
     object: Object,
@@ -1206,7 +1224,22 @@ impl Subscription {
 
     // This loop will keep the stream open and process incoming objects
     // TODO: revisit this logic to handle also fetch requests
-    if let Ok(sub_object) = object.try_into_subgroup() {
+    if let Ok(mut sub_object) = object.try_into_subgroup() {
+
+      if let Some(payload) =sub_object.payload.take(){
+
+
+
+
+        let mut stamped = BytesMut::with_capacity(8 +payload.len());
+
+        stamped.put_u64(now_ms());
+        stamped.extend_from_slice(&payload);
+
+        sub_object.payload = Some(stamped.freeze());
+      }
+
+
       let has_extensions = sub_object.extension_headers.is_some();
       let object_bytes = match sub_object.serialize(previous_object_id, has_extensions) {
         Ok(data) => data,
