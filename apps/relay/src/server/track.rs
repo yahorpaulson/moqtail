@@ -34,6 +34,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use tokio::sync::{Notify, RwLock};
 use tracing::{debug, error, info, warn};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub type ActiveSubgroupHeaderMap = Arc<RwLock<HashMap<StreamId, HeaderInfo>>>;
 
@@ -60,6 +61,7 @@ pub enum TrackEvent {
     stream_id: StreamId,
     object: Object,
     header_info: Option<HeaderInfo>,
+    queued_at_ms: u64,
   },
   Datagram {
     object: Datagram,
@@ -70,6 +72,13 @@ pub enum TrackEvent {
   PublisherDisconnected {
     reason: String,
   },
+}
+
+fn now_ms() -> u64 {
+  SystemTime::now()
+    .duration_since(UNIX_EPOCH)
+    .expect("System time before epoch")
+    .as_millis() as u64
 }
 
 #[derive(Debug, Clone)]
@@ -318,6 +327,7 @@ impl Track {
       stream_id: stream_id.clone(),
       object: object.clone(),
       header_info: header_info.cloned(),
+      queued_at_ms: now_ms(),
     };
 
     self

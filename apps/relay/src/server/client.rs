@@ -45,6 +45,9 @@ use tracing::{debug, error, info, warn};
 use wtransport::{Connection, SendStream, error::StreamWriteError};
 
 use bytes::{Bytes};
+
+use std::time::{SystemTime, UNIX_EPOCH};
+
 /// Token-bucket rate limiter. All streams of one subscriber share a single
 /// bucket so they compete for bandwidth — the QUIC scheduler then drains
 /// higher-priority streams first when writes are pending.
@@ -53,6 +56,13 @@ struct TokenBucket {
   rate_bytes_per_sec: f64,
   tokens: f64,
   last_refill: Instant,
+}
+
+fn now_ms() -> u64 {
+  SystemTime::now()
+    .duration_since(UNIX_EPOCH)
+    .expect("System time before epoch")
+    .as_millis() as u64
 }
 
 impl TokenBucket {
@@ -414,11 +424,48 @@ impl MOQTClient {
 
 
     if let Some(s) = send_stream {
+
+      let mut before_lock = now_ms();
+
       let mut stream = s.lock().await;
 
-      match stream.write_all(&object).await {
-        Ok(..) => {}
+      let after_lock = now_ms();
+
+      info!(
+        "SEND START object={} stream={} bytes={}",
+        object_id, 
+        stream_id, 
+        object.len());
+
+
+      let write_result = stream.write_all(&object).await;
+      let after_write = now_ms();
+
+      info!(
+        "SEND object={} stream={} lock_wait={}ms write_all={}ms, total={}ms",
+        object_id, 
+        stream_id, 
+        after_lock- before_lock, 
+        after_write-after_lock,
+        after_write- before_lock);
+
+
+      match write_result {
+        Ok(..) => {
+          info!("SEND_OK object={} stream={} bytes={} write_all={}ms",
+            object_id, 
+            stream_id,
+            object.len(),
+            after_write - after_lock)
+        },
         Err(e) => {
+          error!(
+            "SEND_ERROR object={} stream={} bytes={} write_all={}ms error={:?}",
+            object_id, 
+            stream_id,
+            object.len(),
+            after_write - after_lock,
+            e);
           match &e {
             StreamWriteError::Closed | StreamWriteError::Stopped(_) => {
               warn!(

@@ -469,6 +469,7 @@ impl Subscription {
                           stream_id: stream_id.unwrap(),
                           object: the_object,
                           header_info,
+                          queued_at_ms: utils::passed_time_since_start() as u64,
                         };
                         info!(
                           "Joining state - subscriber={} relay_track_id={} sending object location: {:?}",
@@ -510,6 +511,17 @@ impl Subscription {
     });
 
     sub
+  }
+
+  
+  async fn receive_event(&self) -> Option<TrackEvent> {
+    let mut event_rx_guard = self.event_rx.lock().await;
+
+    let Some(rx) = event_rx_guard.as_mut else {
+      return None;
+    }
+
+    rx.recv().await
   }
 
   pub async fn is_finished(&self) -> bool {
@@ -881,7 +893,18 @@ impl Subscription {
         mut object,
         stream_id,
         header_info,
+        queued_at_ms      
       } => {
+
+        let queue_exit_ms = now_ms();
+        let queue_wait_ms = queue_exit_ms - queued_at_ms;
+
+
+        info!(
+          "QUEUE_WAIT group={} object = {} wait_ms={}", object.location.group, object.location.object, queue_wait_ms);
+
+
+
         object.track_alias = self.relay_track_id;
         // update last received object location
         {
